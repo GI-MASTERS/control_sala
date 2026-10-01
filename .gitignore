@@ -1,0 +1,16 @@
+# Datos locales con tokens/registros/capturas — NO subir
+data.db
+uploads/screens/*
+uploads/collected/*
+uploads/wallpapers/*
+uploads/files/*
+!uploads/screens/.gitkeep
+!uploads/collected/.gitkeep
+!uploads/wallpapers/.gitkeep
+!uploads/files/.gitkeep
+# Python
+client/__pycache__/
+*.pyc
+# Scripts temporales de mantenimiento
+limpiar*.php
+test_*.php
