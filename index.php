@@ -70,7 +70,7 @@ code.k{font-family:Consolas,monospace;background:#f1f5f9;border:1px solid var(--
 <div class="sm-tok">Token: <code id="tokShow">—</code> <a href="#" onclick="copiarToken();return false">Copiar</a></div>
 <div class="sm-list" id="tokList"></div>
 </div>
-<div class="foot">Servidor <code class="k">192.168.0.220:8000</code><br>Red local VLAN · <span id="srv">en línea</span></div>
+<div class="foot">Servidor <code class="k"><?php require_once __DIR__.'/config.php'; echo htmlspecialchars($_SERVER['HTTP_HOST'] ?? CS_PUBLIC_BASE); ?></code><br><span style="font-size:11px">Base ZIP: <?php echo htmlspecialchars(CS_PUBLIC_BASE); ?></span><br>Red local VLAN · <span id="srv">en línea</span><br><a href="api.php?action=ping" target="_blank" style="color:#60a5fa">probar ping</a> · <a href="api.php?action=estado" target="_blank" style="color:#60a5fa">estado</a></div>
 </aside>
 <div class="main">
 <div class="top">
@@ -80,6 +80,15 @@ code.k{font-family:Consolas,monospace;background:#f1f5f9;border:1px solid var(--
 </div>
 <div class="wrap">
 <?php if(isset($_GET['sent'])) echo '<div class="notice">Comando encolado correctamente. Los equipos lo aplican en el siguiente ciclo de sondeo (≈5 s).</div>'; ?>
+<?php
+require_once __DIR__.'/config.php';
+$__host = $_SERVER['HTTP_HOST'] ?? '';
+$__pb = CS_PUBLIC_BASE;
+$__isLocal = (stripos($__host,'localhost')!==false || strpos($__host,'127.0.0.1')!==false);
+if ($__isLocal && $__pb && stripos($__pb,'localhost')===false && strpos($__pb,'127.0.0.1')===false) {
+  echo '<div class="notice" style="background:#fffbeb;border-color:#fde68a;color:#92400e">Estás abriendo el panel por <b>localhost</b>, pero los ZIP se generarán con <b>'.htmlspecialchars($__pb).'</b>. Para que los agentes conecten, descarga los ZIP desde <b>http://'.htmlspecialchars($_SERVER['SERVER_ADDR'] ?? 'IP_SERVIDOR').':8000</b> o actualiza CS_PUBLIC_BASE en config.php con ipconfig.</div>';
+}
+?>
 
 <div class="stats">
 <div class="stat"><div class="k">Equipos en línea</div><div class="v" id="stOn">0</div><div class="s" id="stTot">0 registrados</div></div>

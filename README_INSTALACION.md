@@ -8,18 +8,18 @@
 4. Abre firewall: permite TCP 80 (o 8000) solo desde tu VLAN.
 5. `data.db` y `uploads/` se crean solos.
 
-## B. Clientes (cada PC alumno Win11)
-1. Instala Python 3.11 desde python.org (marca **Add to PATH**).
-2. Copia carpeta `client/` a `C:\ControlSala\`.
-3. Edita `C:\ControlSala\agente.py`: `SERVIDOR="http://192.168.1.10:8000"` (o `/controlsala`) y `TOKEN` igual que servidor.
-4. `pip install requests` y prueba: `python agente.py` (debe aparecer en el panel).
-5. Auto-inicio: ejecuta `instalar.bat` como Administrador (crea tarea programada al logon).
-6. El alumno guarda sus trabajos en `Documentos\ControlSala\` para que `Recolectar` los encuentre.
+## B. Clientes (cada PC alumno Win11) — USA EL ZIP, no copies client/ a mano
+1. En el panel lateral Agentes: poné etiqueta (Equipo 1), Generar token, Descargar ZIP.
+2. Llevá ese ZIP a la PC alumno, descomprimí, doble clic `instalar.bat` como Administrador (instala Python vía winget si falta + deps offline wheels + tarea logon /rl highest).
+3. El instalador corre `agente.py --probar` solo: tiene que decir OK. Si dice FALLO, corre `diagnostico.bat` y mirá [4] ping y [5] register.
+4. Si cambió la IP del servidor y no querés re-descargar: editá `servidor.txt` junto a agente.py con `http://IP_NUEVA:8000` y reejecutá instalar.bat.
+5. El alumno guarda sus trabajos en `C:\ProgramData\ControlSala\` (NO en Documentos, por Ransomware Protection) para que `Recolectar` los encuentre.
 
-## C. Uso en clase
+## C. Uso en clase + diagnóstico si no aparece nada
+- Si el panel dice 0 equipos: 1) en servidor `http://localhost:8000/api.php?action=ping` debe dar ok, 2) en alumno navegador `http://IP_SERVIDOR:8000/api.php?action=ping` debe abrir, 3) `uploads/register_fails.log` muestra 401 por token.
 - **Fondo:** Subir JPG → Todos → Enviar.
 - **Web:** Pegar URL → Abrir en clientes.
-- **Archivos:** Enviar (llega a Documentos/ControlSala) / Recolectar `*.docx` (llega a `uploads/collected/`).
+- **Archivos:** Enviar (llega a C:\ProgramData\ControlSala) / Recolectar `*.docx` (llega a `uploads/collected/`).
 - **Bloquear:** 🔒 BLOQUEAR TODOS mientras explicas, 🔓 para liberar.
 - **Apagar:** ⏻ con 15s de aviso. Requiere que el agente corra con privilegio para shutdown (tarea con /rl highest).
 

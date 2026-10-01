@@ -8,6 +8,28 @@ if (($_GET['action'] ?? '') === 'screen') {
     if ($h && is_file($f)) { header('Content-Type: image/jpeg'); header('Cache-Control: no-cache'); readfile($f); exit; }
     header('HTTP/1.1 404 Not Found'); exit;
 }
+if (($_GET['action'] ?? '') === 'ping') {
+    // Chequeo rápido sin DB: lo usa agente --probar y navegador para separar red de token
+    require_once __DIR__ . '/config.php';
+    header('Content-Type: application/json; charset=utf-8');
+    $dbOk = is_writable(__DIR__) || is_file(CS_DB);
+    echo json_encode(['ok'=>true,'servidor'=>'ControlSala','time'=>time(),
+        'host'=>($_SERVER['HTTP_HOST'] ?? ''), 'public_base'=>CS_PUBLIC_BASE, 'db_ok'=>$dbOk]);
+    exit;
+}
+if (($_GET['action'] ?? '') === 'estado') {
+    require_once __DIR__ . '/config.php';
+    require_once __DIR__ . '/db.php';
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $pdoE = cs_db();
+        $n = $pdoE->query("SELECT COUNT(*) FROM pcs")->fetchColumn();
+        $on = $pdoE->query("SELECT COUNT(*) FROM pcs WHERE last_seen > ".(time()-CS_ONLINE_SECS))->fetchColumn();
+        echo json_encode(['ok'=>true,'pcs'=>$n,'online'=>$on,'now'=>time(),
+            'host'=>($_SERVER['HTTP_HOST'] ?? ''),'public_base'=>CS_PUBLIC_BASE]);
+    } catch (Exception $e) { http_response_code(500); echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); }
+    exit;
+}
 if (($_GET['action'] ?? '') === 'descargar_agente') {
     // ZIP del agente ya configurado con SERVIDOR + TOKEN ÚNICO del equipo + ETIQUETA. Sin tocar código.
     require_once __DIR__ . '/config.php';
@@ -26,12 +48,21 @@ if (($_GET['action'] ?? '') === 'descargar_agente') {
     }
     $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? '';
+    $isLocal = (strpos($host, '127.0.0.1') !== false || stripos($host, 'localhost') !== false || $host === '');
     // Si se descargó vía localhost, forzar la IP LAN pública para que el cliente no apunte a sí mismo
-    if (strpos($host, '127.0.0.1') !== false || stripos($host, 'localhost') !== false) {
+    if ($isLocal) {
         $servidor = CS_PUBLIC_BASE;
+        // Si CS_PUBLIC_BASE también es localhost/127.0.0.1, intentar autodetectar LAN
+        if (strpos($servidor, '127.0.0.1') !== false || stripos($servidor, 'localhost') !== false) {
+            $lan = @gethostbyname(@gethostname());
+            if ($lan && $lan !== '127.0.0.1' && filter_var($lan, FILTER_VALIDATE_IP)) {
+                $servidor = $proto . '://' . $lan . ':8000';
+            }
+        }
     } else {
         $servidor = $proto . '://' . $host . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
     }
+    $servidor = rtrim($servidor, '/');
     $tpl = @file_get_contents(__DIR__ . '/client/agente.py');
     if (!$tpl) { http_response_code(500); exit('falta client/agente.py'); }
     // Inyectar valores (no-greedy para no comerse comentarios con comillas)
@@ -68,12 +99,16 @@ if (($_GET['action'] ?? '') === 'descargar_agente') {
         . "TODO INCLUIDO: no necesitas instalar nada manual.\r\n"
         . "1. Doble clic instalar.bat (como Administrador). Si falta Python lo instala solo con winget.\r\n"
         . "2. Las dependencias (requests, pillow) van en carpeta wheels/ OFFLINE.\r\n"
-        . "3. Aparece en el panel como $label.\r\n";
+        . "3. Aparece en el panel como $label en <60s.\r\n"
+        . "SI NO APARECE: edita servidor.txt con la IP real, ej http://192.168.0.220:8000, y reejecuta instalar.bat.\r\n"
+        . "Diagnostico: doble clic diagnostico.bat y manda captura de [4] y [5].\r\n";
     $zip = new ZipArchive();
     $tmp = tempnam(sys_get_temp_dir(), 'cs') . '.zip';
     $zip->open($tmp, ZipArchive::CREATE);
     $zip->addFromString('agente.py', $tpl);
     $zip->addFromString('equipo.txt', $label . "\n");
+    $zip->addFromString('servidor.txt', $servidor . "\n");
+    $zip->addFromString('token.txt', $tok . "\n");
     $zip->addFromString('requirements.txt', $req);
     $zip->addFromString('instalar.bat', $bat);
     $zip->addFromString('LEEME.txt', $leeme);
@@ -81,8 +116,9 @@ if (($_GET['action'] ?? '') === 'descargar_agente') {
         . "echo === Diagnostico $label ===\r\n"
         . "echo [1] Python real...\r\npy -3 --version 2>&1\r\npython --version 2>&1\r\necho.\r\n"
         . "echo [2] Librerias...\r\npython -c \"import requests; print('requests OK', requests.__version__)\" 2>&1\r\npython -c \"import PIL; print('pillow OK', PIL.__version__)\" 2>&1\r\necho.\r\n"
-        . "echo [3] Config del agente...\r\nfindstr /R \"^SERVIDOR ^TOKEN ^ETIQUETA\" agente.py\r\necho.\r\n"
-        . "echo [4] Red hacia servidor...\r\ncurl -s -m 10 \"$servidor/api.php?action=list_pcs\"\r\necho.\r\necho.\r\n"
+        . "echo [3] Config del agente...\r\nfindstr /R \"^SERVIDOR ^TOKEN ^ETIQUETA\" agente.py\r\n"
+        . "echo --- servidor.txt override ---\r\ntype servidor.txt 2>&1\r\necho --- equipo.txt ---\r\ntype equipo.txt 2>&1\r\necho.\r\n"
+        . "echo [4] Red hacia servidor (ping)...\r\ncurl -s -m 10 \"$servidor/api.php?action=ping\"\r\necho.\r\necho.\r\n"
         . "echo [5] Registro de prueba...\r\npython agente.py --probar 2>&1\r\necho.\r\n"
         . "echo [6] Tarea programada...\r\nschtasks /query /tn ControlSala 2>&1\r\necho.\r\n"
         . "echo [7] Ultimas lineas de agente.log...\r\nif exist agente.log (powershell -c \"Get-Content agente.log -Tail 15\") else (echo sin agente.log: el agente nunca arranco)\r\n"
@@ -116,7 +152,12 @@ if ($action === 'register' || $action === 'heartbeat') {
     $h = trim($_POST['hostname'] ?? $_GET['hostname'] ?? 'DESCONOCIDO');
     $label = trim($_POST['label'] ?? '');
     $t = $_SERVER['HTTP_X_TOKEN'] ?? $_POST['token'] ?? $_GET['token'] ?? '';
-    if (!cs_agent_token($label !== '' ? $label : $h, $h, $t)) { http_response_code(401); out(['ok'=>false,'error'=>'token inválido']); }
+    if (!cs_agent_token($label !== '' ? $label : $h, $h, $t)) {
+        @file_put_contents(CS_DIR_UPLOADS . '/register_fails.log',
+            date('Y-m-d H:i:s') . " 401 $action host=$h label=$label ip=" . ($_SERVER['REMOTE_ADDR'] ?? '') . "\n", FILE_APPEND);
+        http_response_code(401);
+        out(['ok'=>false,'error'=>'token inválido para label/host ('.$label.'/'.$h.'). Regenera ZIP para esa etiqueta.']);
+    }
     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
     $os = trim($_POST['os_info'] ?? '');
     $user = trim($_POST['username'] ?? '');

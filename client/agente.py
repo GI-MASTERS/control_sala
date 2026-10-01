@@ -19,6 +19,18 @@ except PermissionError:
     BASE_DIR = Path(__file__).parent / "archivos"
     BASE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Override sin reeditar código: servidor.txt / token.txt / equipo.txt
+# Esto permite arreglar IP cambiada sin descargar ZIP nuevo.
+try:
+    _base = Path(__file__).parent
+    _srv = _base / "servidor.txt"
+    if _srv.exists() and _srv.read_text(encoding="utf-8").strip():
+        SERVIDOR = _srv.read_text(encoding="utf-8").strip().rstrip("/")
+    _tok = _base / "token.txt"
+    if _tok.exists() and _tok.read_text(encoding="utf-8").strip():
+        TOKEN = _tok.read_text(encoding="utf-8").strip()
+except Exception:
+    pass
 # Etiqueta desde archivo equipo.txt (para clonar PCs sin editar código)
 try:
     _f = Path(__file__).parent / "equipo.txt"
@@ -58,15 +70,28 @@ sys.excepthook = _fatal
 
 def api(action, method="GET", **kw):
     url = f"{SERVIDOR}/api.php?action={action}"
-    kw.setdefault("headers", HEADERS); kw.setdefault("timeout", 12)
-    return requests.request(method, url, **kw).json()
+    # HEADERS se regenera por si TOKEN vino de token.txt
+    hdr = {"X-Token": TOKEN}
+    hdr.update(kw.pop("headers", {}) or {})
+    kw.setdefault("timeout", 12)
+    r = requests.request(method, url, headers=hdr, **kw)
+    # Error claro si el servidor devuelve HTML/PHP en vez de JSON
+    try:
+        return r.json()
+    except Exception:
+        body = (r.text or "")[:300].replace("\n", " ")
+        raise RuntimeError(f"HTTP {r.status_code} sin JSON en {action}: {body}")
 
 def mi_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
         s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]; s.close(); return ip
     except Exception:
-        return socket.gethostbyname(socket.gethostname())
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return ""
 
 def mi_usuario():
     try: return getpass.getuser()
@@ -74,7 +99,7 @@ def mi_usuario():
 
 def set_wallpaper(file_url, filename="fondo.jpg"):
     dest = BASE_DIR / filename
-    with requests.get(file_url, headers=HEADERS, stream=True, timeout=60) as r:
+    with requests.get(file_url, headers={"X-Token": TOKEN}, stream=True, timeout=60) as r:
         r.raise_for_status()
         with open(dest, "wb") as f:
             for ch in r.iter_content(8192): f.write(ch)
@@ -99,7 +124,7 @@ def capturar_y_subir():
         img.thumbnail((640, 360))
         buf = io.BytesIO(); img.save(buf, "JPEG", quality=55)
         buf.seek(0)
-        requests.post(f"{SERVIDOR}/api.php?action=screenshot", headers=HEADERS,
+        requests.post(f"{SERVIDOR}/api.php?action=screenshot", headers={"X-Token": TOKEN},
             data={"hostname": HOSTNAME}, files={"shot": ("s.jpg", buf, "image/jpeg")}, timeout=15)
     except Exception as e:
         print("screenshot:", e)
@@ -152,7 +177,7 @@ def ejecutar(cmd):
             subprocess.run(["shutdown", "/r", "/t", str(int(p.get("delay", 15))), "/c", "Reinicio por ControlSala"], shell=(os.name == "nt"))
         elif t == "download_file":
             url, fn = p.get("file_url"), p.get("filename", "archivo"); dest = BASE_DIR / fn
-            with requests.get(url, headers=HEADERS, stream=True, timeout=120) as r:
+            with requests.get(url, headers={"X-Token": TOKEN}, stream=True, timeout=120) as r:
                 r.raise_for_status()
                 open(dest, "wb").write(r.content)
             print("descargado:", dest)
@@ -161,7 +186,7 @@ def ejecutar(cmd):
             for pat in p.get("pattern", "*.docx;*.pdf").replace(",", ";").split(";"):
                 for f in glob.glob(str(BASE_DIR / pat.strip())):
                     with open(f, "rb") as fh:
-                        requests.post(f"{SERVIDOR}/api.php?action=upload_collected", headers=HEADERS,
+                        requests.post(f"{SERVIDOR}/api.php?action=upload_collected", headers={"X-Token": TOKEN},
                             data={"hostname": HOSTNAME}, files={"file": (os.path.basename(f), fh)}, timeout=60)
                     print("subido:", f)
         api("ack", "POST", data={"hostname": HOSTNAME, "command_id": cmd["id"]})
@@ -191,13 +216,37 @@ def main():
             print("loop:", e); log(f"loop fallo #{fails}: {e}")
         time.sleep(POLL_SECS)
 
+def probar_conexion():
+    print(f"SERVIDOR={SERVIDOR}")
+    print(f"TOKEN={'*' * min(3, len(TOKEN))}...({len(TOKEN)} chars) ETIQUETA={LABEL} HOSTNAME={HOSTNAME}")
+    # 1) Red básica
+    try:
+        r = requests.get(f"{SERVIDOR}/api.php?action=ping", timeout=10)
+        print(f"[1] ping servidor HTTP {r.status_code}: {(r.text or '')[:200]}")
+        if r.status_code != 200:
+            print("FALLO: el servidor responde pero no es ControlSala. Revisa IP/puerto/carpeta.")
+            return False
+    except Exception as e:
+        print(f"FALLO [1] no hay red hacia {SERVIDOR}: {e}")
+        print("-> Verifica: ipconfig en servidor, php -S 0.0.0.0:8000, firewall TCP 8000, misma VLAN, ping.")
+        print("-> Tip: crea servidor.txt junto a agente.py con la IP correcta, ej: http://192.168.0.220:8000")
+        return False
+    # 2) Registro (token)
+    try:
+        r = api("register", "POST", data={"hostname": HOSTNAME, "label": LABEL,
+            "username": mi_usuario(), "ip_local": mi_ip(), "os_info": sys.platform})
+        print(f"[2] register OK: {r}")
+        print("OK conexion con servidor. Debe aparecer EN LINEA en el panel en <60s.")
+        return True
+    except Exception as e:
+        print(f"FALLO [2] register: {e}")
+        if "401" in str(e) or "token" in str(e).lower():
+            print("-> Token inválido: regenera ZIP para esta etiqueta o crea token.txt con el token único.")
+        return False
+
 if __name__ == "__main__":
     if "--probar" in sys.argv:
-        try:
-            r = api("register", "POST", data={"hostname": HOSTNAME, "label": LABEL,
-                "username": mi_usuario(), "ip_local": mi_ip(), "os_info": sys.platform})
-            print("OK conexion con servidor:", r)
-        except Exception as e:
-            print("FALLO:", e); sys.exit(1)
+        ok = probar_conexion()
+        sys.exit(0 if ok else 1)
     else:
         main()

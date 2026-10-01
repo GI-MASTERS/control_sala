@@ -1,8 +1,5 @@
 @echo off
-REM Instalar agente ControlSala como inicio automatico (Win11)
-pip install -r "%~dp0requirements.txt"
-set SERVIDOR=http://192.168.1.10/controlsala
-echo Edita agente.py y pon SERVIDOR=%SERVIDOR% y el TOKEN
-schtasks /create /tn "ControlSala" /tr "pythonw \"%~dp0agente.py\"" /sc onlogon /rl highest /f
-echo Tarea creada. Se ejecutara al iniciar sesion.
+REM OBSOLETO: no uses este .bat del repo. Descarga el ZIP desde el panel (Agentes - Descargar ZIP) que ya viene configurado.
+REM El ZIP incluye instalar.bat todo-incluido + servidor.txt + token.txt + wheels/ offline.
+echo ESTE ARCHIVO ES VIEJO. Descarga el ZIP del panel para Equipo 1, 2...
 pause

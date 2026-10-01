@@ -1,5 +1,6 @@
 # Datos locales con tokens/registros/capturas — NO subir
 data.db
+uploads/*.log
 uploads/screens/*
 uploads/collected/*
 uploads/wallpapers/*
